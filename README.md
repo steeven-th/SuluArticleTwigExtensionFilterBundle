@@ -178,7 +178,7 @@ class ArticleController extends AbstractController
 
 ## 🐛 Bug and Idea
 
-See the [open issues](https://github.com/steeven-th/SuluGrapesJsBundle/issues) for a list of proposed
+See the [open issues](https://github.com/steeven-th/SuluArticleTwigExtensionFilterBundle/issues) for a list of proposed
 features (and known issues).
 
 ## 💰 Support me
