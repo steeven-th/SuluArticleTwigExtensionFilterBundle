@@ -208,4 +208,4 @@ jobs:
           echo ""
           echo "🔗 **Links:**"
           echo "- Release: https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_VERSION }}"
-          echo "- Packagist: https://packagist.org/packages/itech-world/user-management-bundle"
+          echo "- Packagist: https://packagist.org/packages/itech-world/sulu-article-twig-extension-filter-bundle"

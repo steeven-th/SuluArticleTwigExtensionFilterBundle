@@ -3,7 +3,6 @@
   "description": "SuluArticleTwigExtensionFilterBundle extends the Sulu CMS to enable article retrieval in TWIG without ElasticSearch",
   "type": "sulu-bundle",
   "license": "MIT",
-  "version": "0.1.0",
   "keywords": [
     "sulu",
     "symfony",
@@ -18,6 +17,10 @@
       "homepage": "https://github.com/steeven-th"
     }
   ],
+  "support": {
+    "issues": "https://github.com/steeven-th/SuluArticleTwigExtensionFilterBundle/issues",
+    "source": "https://github.com/steeven-th/SuluArticleTwigExtensionFilterBundle"
+  },
   "require": {
     "php": "^8.2",
     "sulu/sulu": "^3.0@dev"
