@@ -14,6 +14,8 @@ services:
       - '@request_stack'
       - '@sulu_core.webspace.webspace_manager'
 
+  ItechWorld\SuluArticleTwigExtensionFilterBundle\Service\ArticleService: '@itech_world.sulu_article_twig_extension_filter.article_service'
+
   # TWIG EXTENSIONS
   itech_world.sulu_article_twig_extension_filter.article_extension:
     class: ItechWorld\SuluArticleTwigExtensionFilterBundle\Twig\ArticleViewDocumentTwigExtension
