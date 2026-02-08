@@ -43,7 +43,7 @@ return [
 ];
 ```
 
-### Instructions
+## Instructions
 
 #### Retrieve an item using its UUID
 
@@ -83,6 +83,30 @@ Possible parameters:
 - `categoryKeys` : An array of category keys to filter the articles
 - `tagNames` : An array of tag names to filter the articles
 - `webspaceKeys` : An array of webspace keys to filter the articles (only if `ignoreWebspace` is false)
+
+### Returned Data Structure
+
+All functions return articles as arrays with the following properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `uuid` | string | Unique identifier of the article |
+| `id` | int | Database ID |
+| `title` | string | Article title |
+| `description` | string | Excerpt description (from "Excerpt & Taxonomies" tab) |
+| `excerptTitle` | string | Excerpt title (from "Excerpt & Taxonomies" tab) |
+| `excerptMore` | string | "Read more" text (from "Excerpt & Taxonomies" tab) |
+| `url` | string\|null | Article URL |
+| `template` | string\|null | Template key used |
+| `stage` | string | Publication stage (`live`, `draft`) |
+| `locale` | string | Article locale |
+| `published` | DateTime\|null | Publication date |
+| `workflowPlace` | string | Workflow status |
+| `categories` | Collection | Categories (from "Excerpt & Taxonomies" tab) |
+| `tags` | Collection | Tags (from "Excerpt & Taxonomies" tab) |
+| `created` | DateTime | Creation date |
+| `changed` | DateTime | Last modification date |
+| `content` | array | All template data (custom fields from your XML template) |
 
 ### Examples of usage
 
