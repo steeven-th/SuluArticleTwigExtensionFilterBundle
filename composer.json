@@ -23,7 +23,7 @@
   },
   "require": {
     "php": "^8.2",
-    "sulu/sulu": "^3.0@dev"
+    "sulu/sulu": "^3.0"
   },
   "require-dev": {
     "phpunit/phpunit": "^9.6"
