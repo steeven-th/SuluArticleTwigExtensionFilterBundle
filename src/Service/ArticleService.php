@@ -123,8 +123,12 @@ class ArticleService
                 'workflowPlace' => $dimensionContent->getWorkflowPlace(),
                 'categories' => $dimensionContent->getExcerptCategories(),
                 'tags' => $dimensionContent->getExcerptTags(),
+                'authored' => $dimensionContent->getAuthored(),
                 'created' => $article->getCreated(),
                 'changed' => $article->getChanged(),
+                'author' => $dimensionContent->getAuthor()->getFullName(),
+                'creator' => $article->getCreator()->getContact()->getFullName(),
+                'changer' => $article->getChanger()->getContact()->getFullName(),
                 'content' => $templateData,
                 '_original' => $article,
                 '_dimensionContent' => $dimensionContent
