@@ -188,6 +188,7 @@ class ArticleService
             $webspaceKeys
         );
 
+
         $resolvedArticles = [];
         foreach ($articles as $article) {
             $resolved = $this->resolveArticleContent($article, $locale);
@@ -304,79 +305,39 @@ class ArticleService
         $qb = $this->entityManager->createQueryBuilder();
 
         $qb->select('DISTINCT a')
+            // 1. AJOUT DE LA DIMENSION DANS LE SELECT POUR L'EAGER LOADING
+            ->addSelect('dc')
+            ->addSelect('COALESCE(dc.authored, a.created) AS HIDDEN effective_date')
             ->from(ArticleInterface::class, 'a')
+            // 2. UTILISATION DE LEFT JOIN SANS LE "WITH" ICI POUR LE SELECT, MAIS FILTRAGE APRÈS
             ->leftJoin('a.dimensionContents', 'dc')
             ->where('dc.locale = :locale')
             ->andWhere('dc.stage = :stage')
             ->setParameter('locale', $locale)
             ->setParameter('stage', 'live')
-            ->orderBy('a.created', 'DESC')
+            ->orderBy('effective_date', 'DESC')
+            ->setFirstResult($offset)
             ->setMaxResults($limit);
 
-        if ($offset > 0) {
-            $qb->setFirstResult($offset);
-        }
-
-        // Filtrage webspace
+        // Filtrage Webspace (Main + Additional)
         if (!$ignoreWebspace) {
-            $webspacesToFilter = $this->determineWebspacesToFilter($webspaceKeys);
-            if (!empty($webspacesToFilter)) {
-                $qb->andWhere('dc.mainWebspace IN (:webspaces)')
-                    ->setParameter('webspaces', $webspacesToFilter);
+            $webspaces = $this->determineWebspacesToFilter($webspaceKeys);
+            if (!empty($webspaces)) {
+                $qb->leftJoin('dc.additionalWebspaces', 'aw');
+                $qb->andWhere('(dc.mainWebspace IN (:webspaces) OR aw.name IN (:webspaces))')
+                    ->setParameter('webspaces', $webspaces);
             }
         }
 
-        // Filtres optionnels existants via le repository SULU
-        if (!empty($templateKeys) || !empty($categoryKeys) || !empty($tagNames)) {
-            // Pour les filtres complexes, utiliser le repository SULU puis filtrer les résultats
-            $suluFilters = [
-                'locale' => $locale,
-                'stage' => 'live',
-            ];
-
-            if (!empty($templateKeys)) {
-                $suluFilters['templateKeys'] = $templateKeys;
-            }
-
-            if (!empty($categoryKeys)) {
-                $suluFilters['categoryKeys'] = $categoryKeys;
-                $suluFilters['categoryOperator'] = 'OR';
-            }
-
-            if (!empty($tagNames)) {
-                $suluFilters['tagNames'] = $tagNames;
-                $suluFilters['tagOperator'] = 'OR';
-            }
-
-            $selects = [
-                ArticleRepositoryInterface::GROUP_SELECT_ARTICLE_WEBSITE => true,
-                ArticleRepositoryInterface::SELECT_ARTICLE_CONTENT => true,
-            ];
-
-            $allFilteredArticles = $this->articleRepository->findBy($suluFilters, ['created' => 'desc'], $selects);
-
-            // Filtrer par webspace si nécessaire
-            if (!$ignoreWebspace) {
-                $webspacesToFilter = $this->determineWebspacesToFilter($webspaceKeys);
-                if (!empty($webspacesToFilter)) {
-                    $filteredByWebspace = [];
-                    foreach ($allFilteredArticles as $article) {
-                        // Vérifier le webspace de l'article
-                        foreach ($article->getDimensionContents() as $dimensionContent) {
-                            if ($dimensionContent->getLocale() === $locale
-                                && $dimensionContent->getStage() === 'live'
-                                && in_array($dimensionContent->getMainWebspace(), $webspacesToFilter, true)) {
-                                $filteredByWebspace[] = $article;
-                                break;
-                            }
-                        }
-                    }
-                    $allFilteredArticles = $filteredByWebspace;
-                }
-            }
-
-            // Appliquer pagination manuelle
-            return array_slice(iterator_to_array($allFilteredArticles), $offset, $limit);
+        // Filtres Templates / Categories / Tags (Même logique SQL que précédemment)
+        if (!empty($templateKeys)) {
+            $qb->andWhere('dc.templateKey IN (:templates)')->setParameter('templates', $templateKeys);
+        }
+        if (!empty($categoryKeys)) {
+            $qb->innerJoin('dc.excerptCategories', 'category')->andWhere('category.key IN (:categoryKeys)')->setParameter('categoryKeys', $categoryKeys);
+        }
+        if (!empty($tagNames)) {
+            $qb->innerJoin('dc.excerptTags', 'tag')->andWhere('tag.name IN (:tagNames)')->setParameter('tagNames', $tagNames);
         }
 
         return $qb->getQuery()->getResult();
