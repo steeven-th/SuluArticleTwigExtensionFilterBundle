@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace ItechWorld\SuluArticleTwigExtensionFilterBundle\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\QueryBuilder;
 use Sulu\Article\Domain\Model\ArticleInterface;
 use Sulu\Article\Domain\Repository\ArticleRepositoryInterface;
 use Sulu\Component\Webspace\Manager\WebspaceManagerInterface;
@@ -108,6 +109,27 @@ class ArticleService
             // Extraire les données utiles du DimensionContent
             $templateData = $dimensionContent->getTemplateData();
 
+            // Résoudre les catégories en tableaux exploitables dans Twig
+            $resolvedCategories = [];
+            foreach ($dimensionContent->getExcerptCategories() as $category) {
+                $translation = $category->findTranslationByLocale($locale);
+                $name = $translation ? $translation->getTranslation() : $category->getKey();
+                $resolvedCategories[] = [
+                    'id' => $category->getId(),
+                    'key' => $category->getKey(),
+                    'name' => $name,
+                    'title' => $name,
+                ];
+            }
+
+            // Résoudre les tags en tableaux exploitables dans Twig
+            $resolvedTags = [];
+            foreach ($dimensionContent->getExcerptTags() as $tag) {
+                $resolvedTags[] = [
+                    'name' => $tag->getName(),
+                ];
+            }
+
             return [
                 'uuid' => $article->getUuid(),
                 'id' => $article->getId(),
@@ -121,8 +143,8 @@ class ArticleService
                 'locale' => $dimensionContent->getLocale(),
                 'published' => $dimensionContent->getWorkflowPublished(),
                 'workflowPlace' => $dimensionContent->getWorkflowPlace(),
-                'categories' => $dimensionContent->getExcerptCategories(),
-                'tags' => $dimensionContent->getExcerptTags(),
+                'categories' => $resolvedCategories,
+                'tags' => $resolvedTags,
                 'authored' => $dimensionContent->getAuthored(),
                 'created' => $article->getCreated(),
                 'changed' => $article->getChanged(),
@@ -176,24 +198,27 @@ class ArticleService
             $locale = $request->getLocale();
         }
 
-        // Utiliser une requête custom avec filtrage webspace
-        $articles = $this->findArticlesWithWebspaceFilter(
-            $limit,
-            0, // offset = 0 pour loadRecent
-            $templateKeys,
+        // Construire la requête avec tous les filtres
+        $qb = $this->buildArticleQueryBuilder(
             $locale,
             $ignoreWebspace,
+            $templateKeys,
             $categoryKeys,
             $tagNames,
             $webspaceKeys
         );
 
+        $qb->select('DISTINCT a')
+            ->addSelect('dc')
+            ->addSelect('COALESCE(dc.authored, a.created) AS HIDDEN effective_date')
+            ->orderBy('effective_date', 'DESC')
+            ->setMaxResults($limit);
+
+        $articles = $qb->getQuery()->getResult();
 
         $resolvedArticles = [];
         foreach ($articles as $article) {
-            $resolved = $this->resolveArticleContent($article, $locale);
-            $resolved['_original'] = $article; // Garder une référence à l'article original
-            $resolvedArticles[] = $resolved;
+            $resolvedArticles[] = $this->resolveArticleContent($article, $locale);
         }
 
         return $resolvedArticles;
@@ -201,6 +226,9 @@ class ArticleService
 
     /**
      * Récupère les articles récents avec contenu résolu et pagination.
+     *
+     * Utilise un QueryBuilder partagé : un clone pour le COUNT total,
+     * puis l'original avec LIMIT/OFFSET pour les articles paginés.
      *
      * @param int $limit Nombre maximum d'articles à retourner
      * @param int $offset Nombre d'articles à ignorer (pour la pagination)
@@ -229,33 +257,35 @@ class ArticleService
             $locale = $request->getLocale();
         }
 
-        // Compter le total d'articles (pour pagination AJAX)
-        $totalCount = $this->countArticlesWithWebspaceFilter(
-            $templateKeys,
+        // Construire la requête de base avec tous les filtres (FROM, JOIN, WHERE)
+        $qb = $this->buildArticleQueryBuilder(
             $locale,
             $ignoreWebspace,
+            $templateKeys,
             $categoryKeys,
             $tagNames,
             $webspaceKeys
         );
 
-        // Récupérer les articles paginés (pour AJAX)
-        $paginatedArticles = $this->findArticlesWithWebspaceFilter(
-            $limit,
-            $offset,
-            $templateKeys,
-            $locale,
-            $ignoreWebspace,
-            $categoryKeys,
-            $tagNames,
-            $webspaceKeys
-        );
+        // Compter le total via un clone du QueryBuilder de base
+        $countQb = clone $qb;
+        $countQb->select('COUNT(DISTINCT a.uuid)');
+        $totalCount = (int) $countQb->getQuery()->getSingleScalarResult();
+
+        // Récupérer les articles paginés avec l'original
+        $qb->select('DISTINCT a')
+            ->addSelect('dc')
+            ->addSelect('COALESCE(dc.authored, a.created) AS HIDDEN effective_date')
+            ->orderBy('effective_date', 'DESC')
+            ->setFirstResult($offset)
+            ->setMaxResults($limit);
+
+        $paginatedArticles = $qb->getQuery()->getResult();
 
         // Résoudre le contenu de chaque article paginé
         $resolvedArticles = [];
         foreach ($paginatedArticles as $article) {
-            $resolved = $this->resolveArticleContent($article, $locale);
-            $resolvedArticles[] = $resolved;
+            $resolvedArticles[] = $this->resolveArticleContent($article, $locale);
         }
 
         return [
@@ -273,51 +303,42 @@ class ArticleService
                 'requestedOffset' => $offset,
                 'requestedLimit' => $limit,
                 'webspaceFiltering' => !$ignoreWebspace,
-                'webspaceKeys' => $webspaceKeys
-            ]
+                'webspaceKeys' => $webspaceKeys,
+            ],
         ];
     }
 
     /**
-     * Récupère les articles avec filtrage webspace via requête Doctrine custom.
+     * Construit le QueryBuilder de base avec tous les filtres communs.
      *
-     * @param int $limit Nombre maximum d'articles
-     * @param int $offset Décalage pour la pagination
-     * @param array $templateKeys Types de templates
+     * Factorisation des clauses FROM, JOIN et WHERE partagées entre
+     * les requêtes de comptage et de récupération d'articles.
+     *
      * @param string|null $locale Locale
      * @param bool $ignoreWebspace Ignorer le filtrage webspace
+     * @param array $templateKeys Types de templates
      * @param array $categoryKeys Clés de catégories
      * @param array $tagNames Noms de tags
      * @param array $webspaceKeys Clés de webspaces spécifiques
      *
-     * @return ArticleInterface[] Articles trouvés
+     * @return QueryBuilder Le QueryBuilder prêt à recevoir un SELECT
      */
-    private function findArticlesWithWebspaceFilter(
-        int $limit,
-        int $offset,
-        array $templateKeys = [],
-        ?string $locale = null,
-        bool $ignoreWebspace = false,
-        array $categoryKeys = [],
-        array $tagNames = [],
-        array $webspaceKeys = []
-    ): array {
+    private function buildArticleQueryBuilder(
+        ?string $locale,
+        bool $ignoreWebspace,
+        array $templateKeys,
+        array $categoryKeys,
+        array $tagNames,
+        array $webspaceKeys
+    ): QueryBuilder {
         $qb = $this->entityManager->createQueryBuilder();
 
-        $qb->select('DISTINCT a')
-            // 1. AJOUT DE LA DIMENSION DANS LE SELECT POUR L'EAGER LOADING
-            ->addSelect('dc')
-            ->addSelect('COALESCE(dc.authored, a.created) AS HIDDEN effective_date')
-            ->from(ArticleInterface::class, 'a')
-            // 2. UTILISATION DE LEFT JOIN SANS LE "WITH" ICI POUR LE SELECT, MAIS FILTRAGE APRÈS
+        $qb->from(ArticleInterface::class, 'a')
             ->leftJoin('a.dimensionContents', 'dc')
             ->where('dc.locale = :locale')
             ->andWhere('dc.stage = :stage')
             ->setParameter('locale', $locale)
-            ->setParameter('stage', 'live')
-            ->orderBy('effective_date', 'DESC')
-            ->setFirstResult($offset)
-            ->setMaxResults($limit);
+            ->setParameter('stage', 'live');
 
         // Filtrage Webspace (Main + Additional)
         if (!$ignoreWebspace) {
@@ -329,116 +350,23 @@ class ArticleService
             }
         }
 
-        // Filtres Templates / Categories / Tags (Même logique SQL que précédemment)
+        // Filtres Templates / Categories / Tags
         if (!empty($templateKeys)) {
-            $qb->andWhere('dc.templateKey IN (:templates)')->setParameter('templates', $templateKeys);
+            $qb->andWhere('dc.templateKey IN (:templates)')
+                ->setParameter('templates', $templateKeys);
         }
         if (!empty($categoryKeys)) {
-            $qb->innerJoin('dc.excerptCategories', 'category')->andWhere('category.key IN (:categoryKeys)')->setParameter('categoryKeys', $categoryKeys);
+            $qb->innerJoin('dc.excerptCategories', 'category')
+                ->andWhere('category.key IN (:categoryKeys)')
+                ->setParameter('categoryKeys', $categoryKeys);
         }
         if (!empty($tagNames)) {
-            $qb->innerJoin('dc.excerptTags', 'tag')->andWhere('tag.name IN (:tagNames)')->setParameter('tagNames', $tagNames);
+            $qb->innerJoin('dc.excerptTags', 'tag')
+                ->andWhere('tag.name IN (:tagNames)')
+                ->setParameter('tagNames', $tagNames);
         }
 
-        return $qb->getQuery()->getResult();
-    }
-
-    /**
-     * Compte les articles avec filtrage webspace.
-     *
-     * @param array $templateKeys Types de templates
-     * @param string|null $locale Locale
-     * @param bool $ignoreWebspace Ignorer le filtrage webspace
-     * @param array $categoryKeys Clés de catégories
-     * @param array $tagNames Noms de tags
-     * @param array $webspaceKeys Clés de webspaces spécifiques
-     *
-     * @return int Nombre d'articles
-     */
-    private function countArticlesWithWebspaceFilter(
-        array $templateKeys = [],
-        ?string $locale = null,
-        bool $ignoreWebspace = false,
-        array $categoryKeys = [],
-        array $tagNames = [],
-        array $webspaceKeys = []
-    ): int {
-        // Pour les filtres complexes (templates, categories, tags),
-        // utiliser le repository SULU puis compter les résultats
-        if (!empty($templateKeys) || !empty($categoryKeys) || !empty($tagNames)) {
-            $suluFilters = [
-                'locale' => $locale,
-                'stage' => 'live',
-            ];
-
-            if (!empty($templateKeys)) {
-                $suluFilters['templateKeys'] = $templateKeys;
-            }
-
-            if (!empty($categoryKeys)) {
-                $suluFilters['categoryKeys'] = $categoryKeys;
-                $suluFilters['categoryOperator'] = 'OR';
-            }
-
-            if (!empty($tagNames)) {
-                $suluFilters['tagNames'] = $tagNames;
-                $suluFilters['tagOperator'] = 'OR';
-            }
-
-            // Utiliser countBy du repository SULU (plus efficace pour ces filtres)
-            $totalWithSuluFilters = $this->articleRepository->countBy($suluFilters);
-
-            // Si pas de filtrage webspace, retourner directement
-            if ($ignoreWebspace) {
-                return $totalWithSuluFilters;
-            }
-
-            // Sinon, récupérer les articles et filtrer par webspace
-            $allFilteredArticles = $this->articleRepository->findBy($suluFilters, ['created' => 'desc'], [
-                ArticleRepositoryInterface::GROUP_SELECT_ARTICLE_WEBSITE => true,
-                ArticleRepositoryInterface::SELECT_ARTICLE_CONTENT => true,
-            ]);
-
-            $webspacesToFilter = $this->determineWebspacesToFilter($webspaceKeys);
-            if (empty($webspacesToFilter)) {
-                return $totalWithSuluFilters;
-            }
-
-            $count = 0;
-            foreach ($allFilteredArticles as $article) {
-                foreach ($article->getDimensionContents() as $dimensionContent) {
-                    if ($dimensionContent->getLocale() === $locale
-                        && $dimensionContent->getStage() === 'live'
-                        && in_array($dimensionContent->getMainWebspace(), $webspacesToFilter, true)) {
-                        $count++;
-                        break;
-                    }
-                }
-            }
-            return $count;
-        }
-
-        // Pour les cas simples (pas de filtres complexes), requête COUNT optimisée
-        $qb = $this->entityManager->createQueryBuilder();
-
-        $qb->select('COUNT(DISTINCT a.uuid)')
-            ->from(ArticleInterface::class, 'a')
-            ->leftJoin('a.dimensionContents', 'dc')
-            ->where('dc.locale = :locale')
-            ->andWhere('dc.stage = :stage')
-            ->setParameter('locale', $locale)
-            ->setParameter('stage', 'live');
-
-        // Filtrage webspace
-        if (!$ignoreWebspace) {
-            $webspacesToFilter = $this->determineWebspacesToFilter($webspaceKeys);
-            if (!empty($webspacesToFilter)) {
-                $qb->andWhere('dc.mainWebspace IN (:webspaces)')
-                    ->setParameter('webspaces', $webspacesToFilter);
-            }
-        }
-
-        return (int) $qb->getQuery()->getSingleScalarResult();
+        return $qb;
     }
 
     /**
