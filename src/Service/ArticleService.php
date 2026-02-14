@@ -137,7 +137,7 @@ class ArticleService
                 'description' => $dimensionContent->getExcerptDescription() ?? '',
                 'excerptTitle' => $dimensionContent->getExcerptTitle() ?? '',
                 'excerptMore' => $dimensionContent->getExcerptMore() ?? '',
-                'url' => $templateData['url'] ?? null,
+                'url' => $this->resolveArticleUrl($templateData['url'] ?? null),
                 'template' => $dimensionContent->getTemplateKey() ?? null,
                 'stage' => $dimensionContent->getStage(),
                 'locale' => $dimensionContent->getLocale(),
@@ -367,6 +367,34 @@ class ArticleService
         }
 
         return $qb;
+    }
+
+    /**
+     * Résout l'URL d'un article depuis les données brutes du template.
+     *
+     * Gère les deux formats possibles :
+     * - String (type "route") : retourne la valeur telle quelle
+     * - Array (type "page_tree_route") : construit l'URL depuis page.path + suffix
+     *
+     * @param mixed $urlData Données brutes du champ URL
+     *
+     * @return string|null L'URL résolue ou null
+     */
+    private function resolveArticleUrl(mixed $urlData): ?string
+    {
+        if (\is_string($urlData)) {
+            return $urlData;
+        }
+
+        if (\is_array($urlData)
+            && \is_array($urlData['page'] ?? null)
+            && \is_string($urlData['page']['path'] ?? null)
+            && \is_string($urlData['suffix'] ?? null)
+        ) {
+            return \rtrim($urlData['page']['path'], '/') . '/' . \ltrim($urlData['suffix'], '/');
+        }
+
+        return null;
     }
 
     /**
