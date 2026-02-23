@@ -345,7 +345,7 @@ class ArticleService
             $webspaces = $this->determineWebspacesToFilter($webspaceKeys);
             if (!empty($webspaces)) {
                 $qb->leftJoin('dc.additionalWebspaces', 'aw');
-                $qb->andWhere('(dc.mainWebspace IN (:webspaces) OR aw.name IN (:webspaces))')
+                $qb->andWhere('(dc.mainWebspace IN (:webspaces) OR aw.additionalWebspace IN (:webspaces))')
                     ->setParameter('webspaces', $webspaces);
             }
         }
