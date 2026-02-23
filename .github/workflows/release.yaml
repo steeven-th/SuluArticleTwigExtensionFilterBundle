@@ -23,9 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     # Condition adaptée pour les deux types de déclenchement
     if: |
-      (github.event_name == 'pull_request' && 
-       github.event.pull_request.merged == true && 
-       github.event.pull_request.head.ref == 'dev') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true) ||
       (github.event_name == 'workflow_dispatch')
 
     steps:
